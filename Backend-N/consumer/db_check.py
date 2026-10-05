@@ -16,7 +16,7 @@ import psycopg2
 import redis
 
 import config
-
+ 
 
 def check_postgres():
     print("[db_check] Connecting to Postgres ...")
