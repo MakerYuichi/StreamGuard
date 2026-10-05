@@ -1,0 +1,70 @@
+version: "3.8"
+
+# StreamGuard - Phase 1 Infrastructure
+# Spins up: Redpanda (Kafka-compatible broker), Postgres (with TimescaleDB), Redis
+#
+# Usage:
+#   docker compose up -d
+#   docker compose ps          <- confirm all 3 services show "healthy" / "running"
+#   docker compose logs -f     <- watch logs if something looks wrong
+#   docker compose down        <- stop everything
+#   docker compose down -v     <- stop + wipe all data (use if you need a clean slate)
+
+services:
+
+  # ---- Kafka-compatible broker (Redpanda = single binary, no Zookeeper needed) ----
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: streamguard-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"   # Kafka API port - this is what the consumer/producer scripts connect to
+      - "9644:9644"   # Admin/metrics API (optional, useful for debugging)
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---- Postgres (TimescaleDB image = Postgres + TimescaleDB extension pre-installed) ----
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: streamguard-postgres
+    environment:
+      POSTGRES_USER: streamguard
+      POSTGRES_PASSWORD: streamguard
+      POSTGRES_DB: streamguard
+    ports:
+      - "5439:5432"   # standard Postgres port
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d   # auto-runs the SQL in init-db/ on first startup
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streamguard -d streamguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---- Redis (hot-path cache, used later for k-hop adjacency lookups) ----
+  redis:
+    image: redis:7-alpine
+    container_name: streamguard-redis
+    ports:
+      - "6379:6379"   # standard Redis port
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
