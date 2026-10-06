@@ -1,51 +1,63 @@
-"""WebSocket alert broadcaster, hosted on a dedicated asyncio thread."""
+"""
+StreamGuard - WebSocket Server
+Broadcasts alerts to any connected frontend client, per the agreed
+message format: {"type": "alert", "data": {...}}
+
+Runs in its own thread so the Kafka consumer loop isn't blocked.
+"""
+
 import asyncio
 import json
 import threading
 
 import websockets
+
 import config
 
-_clients = set()
+_connected_clients = set()
 _loop = None
-_ready = threading.Event()
 
 
 async def _handler(websocket):
-    _clients.add(websocket)
+    _connected_clients.add(websocket)
+    print(f"[websocket] client connected ({len(_connected_clients)} total)")
     try:
-        await websocket.wait_closed()
+        async for _ in websocket:
+            pass  # we don't expect incoming messages from the frontend
     finally:
-        _clients.discard(websocket)
+        _connected_clients.remove(websocket)
+        print(f"[websocket] client disconnected ({len(_connected_clients)} total)")
 
 
-async def _broadcast(message):
-    if _clients:
-        await asyncio.gather(*(client.send(json.dumps(message)) for client in tuple(_clients)),
-                             return_exceptions=True)
+async def _broadcast_async(message: dict):
+    if _connected_clients:
+        payload = json.dumps(message)
+        await asyncio.gather(
+            *[client.send(payload) for client in _connected_clients],
+            return_exceptions=True,
+        )
 
 
-def broadcast(alert):
-    if _loop and _loop.is_running():
-        asyncio.run_coroutine_threadsafe(_broadcast({"type": "alert", "data": alert}), _loop)
+def broadcast(alert: dict):
+    """Call this from the (synchronous) consumer loop."""
+    message = {"type": "alert", "data": alert}
+    if _loop is not None:
+        asyncio.run_coroutine_threadsafe(_broadcast_async(message), _loop)
 
 
-def _serve():
+def _run_server():
     global _loop
     _loop = asyncio.new_event_loop()
     asyncio.set_event_loop(_loop)
 
-    async def run():
+    async def main():
         async with websockets.serve(_handler, config.WEBSOCKET_HOST, config.WEBSOCKET_PORT):
-            _ready.set()
-            await asyncio.Future()
+            print(f"[websocket] listening on ws://{config.WEBSOCKET_HOST}:{config.WEBSOCKET_PORT}")
+            await asyncio.Future()  # run forever
 
-    _loop.run_until_complete(run())
+    _loop.run_until_complete(main())
 
 
 def start_in_background():
-    thread = threading.Thread(target=_serve, name="streamguard-websocket", daemon=True)
+    thread = threading.Thread(target=_run_server, daemon=True)
     thread.start()
-    if not _ready.wait(timeout=5):
-        raise RuntimeError("WebSocket server failed to start within 5 seconds")
-    return thread
