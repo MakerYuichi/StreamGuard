@@ -1,144 +1,98 @@
-# StreamGuard — Phase 1 (Role 3: Backend / Storage Infrastructure)
+# StreamGuard backend
 
-This folder gets you from zero to a **proven, working Kafka → Consumer pipe**,
-with Postgres and Redis verified and ready for Phase 2.
+The backend project lives in `Backend-N/`; the React frontend is the sibling `frontend/` directory. Run backend commands from this directory unless a command says otherwise.
 
-Nothing here does real anomaly scoring yet — that's intentional. Phase 1's
-only job is to prove every pipe works, using fake/placeholder data, so
-Phase 2 is just "swap the placeholder for the real thing" instead of
-debugging infrastructure and algorithm logic at the same time.
+## Layout
 
----
+- `docker-compose.yml`: Redpanda, TimescaleDB/Postgres, and Redis.
+- `init-db/01_init.sql`: database schema initialization.
+- `algorithm/`: bounded-memory Count-Min Sketch edge scoring.
+- `consumer/`: shared config, Kafka consumer, Postgres writer, and WebSocket server.
+- `ingestion/`: DARPA CSV replay into the `raw-events` topic.
+- `baseline/`: batch comparison utilities.
+- `data/`: downloaded CSVs; intentionally excluded from Git.
 
-## Prerequisites
+## Setup
 
-- Docker + Docker Compose installed
-- Python 3.9+
-- (Optional but recommended) a virtual environment
-
----
-
-## Step-by-step
-
-### 1. Start the infrastructure
-
-```bash
+```sh
+cd Backend-N
+python3 -m venv .venv
+source .venv/bin/activate
+# If the old kafka-python package is installed in this environment, remove it
+# first; it shares the `kafka` import namespace with kafka-python-ng.
+python -m pip uninstall -y kafka-python
+python -m pip install -r consumer/requirements.txt
+python -m pip install -r ingestion/requirements.txt
+python -m pip install -r baseline/requirements.txt
 docker compose up -d
-docker compose ps
 ```
 
-Wait until all three services (`streamguard-redpanda`, `streamguard-postgres`,
-`streamguard-redis`) show as healthy/running. This can take 15-30 seconds on
-first startup (Postgres is running the init SQL script automatically).
+The Postgres initialization scripts run only when the database volume is first created. To reinitialize from scratch, `docker compose down -v` removes the stored database contents.
 
-If something looks stuck:
-```bash
-docker compose logs -f
+Download the dataset files into `Backend-N/data/` (the DARPA MIDAS processed edge CSV and aligned ground-truth label CSV). For the source URLs used by this project:
+
+```sh
+mkdir -p data
+curl -fL https://raw.githubusercontent.com/Stream-AD/MIDAS/master/data/darpa_processed.csv -o data/darpa_processed.csv
+curl -fL https://raw.githubusercontent.com/Stream-AD/MIDAS/master/data/darpa_ground_truth.csv -o data/darpa_ground_truth.csv
 ```
 
-### 2. Install Python dependencies
+Inspect their first lines and keep the original files unchanged. The scripts accept either a header row or headerless `src,dst,timestamp` columns; labels must be one row per event in matching order. Install baseline dependencies with `python -m pip install -r baseline/requirements.txt`.
 
-```bash
-cd consumer
-pip install -r requirements.txt
+Check the scoring module independently:
+
+```sh
+python -m algorithm.test_scorer
 ```
 
-### 3. Verify Postgres + Redis actually work
+## Run the live pipeline
 
-```bash
-python db_check.py
+Open separate terminals, all in `Backend-N/` except the frontend terminal.
+
+Terminal A, start the consumer (it also starts the WebSocket server):
+
+```sh
+python consumer/consumer_v2.py
 ```
 
-Expected output ends with:
-```
-[db_check] ALL CHECKS PASSED. Infrastructure is ready for Phase 2.
-```
+Terminal B, replay headerless input at 200 events per second, up to 2,000 events:
 
-If this fails, **stop here and fix it** before moving on — nothing downstream
-will work if this doesn't pass.
-
-### 4. Create the Kafka topic (first time only)
-
-Redpanda usually auto-creates topics on first use, but to be safe, create it
-explicitly:
-
-```bash
-docker exec -it streamguard-redpanda rpk topic create raw-events
-docker exec -it streamguard-redpanda rpk topic list
+```sh
+python ingestion/darpa_replayer.py data/darpa_processed.csv --header no --rate 200 --limit 2000
 ```
 
-You should see `raw-events` listed.
+If you want the original dataset timestamps instead of simulated replay time, add `--preserve-timestamps`. To attach the aligned labels to Kafka events, add `--ground-truth data/darpa_ground_truth.csv`.
 
-### 5. Prove the Kafka pipe works end-to-end
+Terminal C, launch the dashboard from the repository root:
 
-Open **two terminals**.
-
-**Terminal A** — start the consumer (it will sit and wait for events):
-```bash
-cd consumer
-python consumer_skeleton.py
+```sh
+cd ../frontend
+npm install
+npm run dev
 ```
 
-**Terminal B** — send fake test events:
-```bash
-cd consumer
-python test_producer.py --count 20 --delay 0.3
+The browser connects to `ws://localhost:8080`. The default host and port settings are in `consumer/config.py`.
+
+## Batch baseline and database summary
+
+From `Backend-N/`:
+
+```sh
+python baseline/baseline_batch.py data/darpa_processed.csv --no-header --window 10 --zthresh 2.5 --ground-truth data/darpa_ground_truth.csv
+python baseline/compare_results.py
 ```
 
-**Expected result:** within a second or two of running the producer, Terminal
-A should start printing lines like:
-```
-[consumer] [ok   ] #1  {'src': '192.168.1.7', 'dst': '10.0.0.3', 'timestamp': 1234567890, 'anomaly_score': 4.0, 'is_alert': True}
-```
+The batch script checks that the event and ground-truth files have matching row counts. The database summary excludes the schema's `test_src` initialization row. Database totals include previous runs unless the database is reset.
 
-If you see this — **Phase 1 is complete.** The full pipe (Kafka → Consumer)
-is proven to work, Postgres and Redis are verified, and the project is ready
-to hand off for Phase 2.
+## Data and algorithm notes
 
----
+The scorer is a Count-Min-Sketch-based burst heuristic inspired by MIDAS. It is not a full reproduction of the paper's microcluster detector. It decays historical counters at tick boundaries, so its sketch storage remains bounded; approximation error and integer decay affect the estimates. Alert threshold is `3.0` in `algorithm/midas_scorer.py` and should be tuned against labeled data before making accuracy claims.
 
-## What Phase 2 needs to do (for whoever picks this up next)
+The replayer defaults to simulated timestamps based on its send rate so events arrive in current time buckets. `--preserve-timestamps` instead uses column three (or the named `timestamp` column) from the dataset. Do not use it when the source timestamps are not Unix seconds.
 
-Everything is marked with `# --- Phase 2 will add here: ---` comments inside
-`consumer_skeleton.py`. In order:
+## Stop services
 
-1. **Replace `fake_score_event()`** with the real scoring function from
-   Role 1 (Count-Min Sketch + chi-squared logic). Keep the same input/output
-   shape — don't change the contract, just swap the internals.
-2. **Add a `db_writer.py`** module with two functions:
-   - `write_score(scored_event)` → inserts into the `scores` table
-   - `write_alert(scored_event)` → inserts into the `alerts` table, returns
-     the generated `alert_id`
-   - Connection pattern to copy: see `db_check.py`, it already shows working
-     insert statements for both tables.
-3. **Add a `websocket_server.py`** module:
-   - A basic WebSocket server (e.g. using the `websockets` Python library)
-     listening on `config.WEBSOCKET_HOST:config.WEBSOCKET_PORT`
-   - A `broadcast(alert)` function the consumer calls whenever a new alert
-     is written — pushes `{"type": "alert", "data": {...}}` to all connected
-     clients (per the agreed WebSocket message format)
-4. **Swap `test_producer.py` out for the real DARPA replayer** (Role 2's
-   script) once it's ready — same topic, same event shape, so nothing else
-   needs to change.
-
----
-
-## File reference
-
-| File | Purpose |
-|---|---|
-| `docker-compose.yml` | Spins up Redpanda, Postgres (+TimescaleDB), Redis |
-| `init-db/01_init.sql` | Auto-creates `scores` and `alerts` tables on first Postgres startup |
-| `consumer/config.py` | All shared ports/hosts/topic names/threshold — change values here once, not scattered across files |
-| `consumer/test_producer.py` | Sends fake events into Kafka — used only to prove the pipe works |
-| `consumer/consumer_skeleton.py` | Reads events from Kafka, applies placeholder scoring, prints results — **this is what Phase 2 extends** |
-| `consumer/db_check.py` | One-time script to verify Postgres + Redis are working correctly |
-
----
-
-## Shutting down
-
-```bash
-docker compose down        # stop everything, keep data
-docker compose down -v     # stop everything AND wipe all data (clean slate)
+```sh
+docker compose down       # stop services, keep database volume
+docker compose down -v    # stop services and delete database volume
 ```

@@ -1,5 +1,3 @@
-version: "3.8"
-
 # StreamGuard - Phase 1 Infrastructure
 # Spins up: Redpanda (Kafka-compatible broker), Postgres (with TimescaleDB), Redis
 #

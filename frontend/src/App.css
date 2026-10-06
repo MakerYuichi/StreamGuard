@@ -83,3 +83,14 @@ body {
   font-size: 13px;
   font-style: italic;
 }
+
+.alert-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px;
+  margin-bottom: 6px;
+  background: #241a1c;
+  border-left: 3px solid #e63946;
+  border-radius: 4px;
+  font-size: 12px;
+}

@@ -20,9 +20,13 @@ CREATE TABLE IF NOT EXISTS scores (
     event_time      TIMESTAMPTZ NOT NULL,   -- converted from the incoming unix timestamp
     anomaly_score   DOUBLE PRECISION NOT NULL,
     is_alert        BOOLEAN     NOT NULL DEFAULT FALSE,
+    label           SMALLINT    CHECK (label IN (0, 1)),
     ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when OUR system processed it (for latency measurement)
     PRIMARY KEY (id, event_time)
 );
+
+-- Also supports existing databases that were initialized before labels were stored.
+ALTER TABLE scores ADD COLUMN IF NOT EXISTS label SMALLINT CHECK (label IN (0, 1));
 
 -- Turn it into a TimescaleDB hypertable partitioned by event_time.
 -- This is what gives fast time-range queries even with millions of rows.
