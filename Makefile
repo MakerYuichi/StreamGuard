@@ -23,6 +23,7 @@ help:
 	@echo "  consumer    Start the Phase-2 consumer (requires infra-up)"
 	@echo "  frontend    Start the Vite dev server"
 	@echo "  eval        Run the batch-vs-streaming comparison (requires infra-up + replay + consumer)"
+	@echo "  attributes  Analyze CIC-IDS2017 attributes and generate detection rules"
 	@echo ""
 
 # ── Infrastructure ─────────────────────────────────────────────────────────────
@@ -64,3 +65,9 @@ eval:
 		--ground-truth data/darpa_ground_truth_subset.csv \
 		--window 10 \
 		--zthresh 2.5
+
+# ── Attribute Analysis ─────────────────────────────────────────────────────────
+attributes:
+	python scripts/attribute_analysis.py \
+		--input data/processed/cic-ids2017.parquet \
+		--output results/
