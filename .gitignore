@@ -1,0 +1,62 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.env
+*.env
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+# Ignore everything in data/ by default …
+data/*.csv
+data/*.parquet
+data/*.feather
+data/processed/
+data/raw/
+data/cic-ids2017/
+data/unsw-nb15/
+
+# … but keep the README and the legacy DARPA regression files
+!data/README.md
+!data/.gitkeep
+!data/darpa_processed.csv
+!data/darpa_ground_truth.csv
+!data/darpa_subset.csv
+!data/darpa_ground_truth_subset.csv
+!data/darpa_shape.txt
+!data/fake_traffic.csv
+
+# ── Results ───────────────────────────────────────────────────────────────────
+results/*
+!results/.gitkeep
+
+# ── Trained models ────────────────────────────────────────────────────────────
+streamguard/models/*.pkl
+streamguard/models/*.joblib
+streamguard/models/*.pt
+streamguard/models/*.pth
+
+# ── IDE & OS ──────────────────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+infra/pgdata/

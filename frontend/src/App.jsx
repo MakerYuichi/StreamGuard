@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Graph from './Graph.jsx'
 import './App.css'
 
-const WS_URL = 'ws://localhost:8080'
+const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:8080'
 const MAX_VISIBLE_NODES = 45
 const MAX_VISIBLE_EDGES = 55
 const MAX_VISIBLE_ALERTS = 12
