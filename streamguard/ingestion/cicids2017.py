@@ -164,7 +164,12 @@ class CICIDSLoader:
         dfs = []
         for fpath in self.raw_files:
             print(f"Loading {Path(fpath).name}...")
-            df = pd.read_csv(fpath)
+            # Try UTF-8 first, fall back to ISO-8859-1 (Latin-1) for problematic files
+            try:
+                df = pd.read_csv(fpath, encoding='utf-8')
+            except UnicodeDecodeError:
+                print(f"  (UTF-8 failed, trying ISO-8859-1...)")
+                df = pd.read_csv(fpath, encoding='iso-8859-1')
             if sample and len(df) > sample:
                 df = df.sample(n=sample, random_state=42)
             dfs.append(df)
@@ -287,7 +292,7 @@ def main() -> None:
     args = parser.parse_args()
 
     loader = CICIDSLoader()
-    df = loader.load(args.pattern, sample=args.sample)
+    loader.load(args.pattern, sample=args.sample)
     print("\nSummary:")
     for key, val in loader.describe().items():
         print(f"  {key}: {val}")

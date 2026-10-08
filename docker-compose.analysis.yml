@@ -4,18 +4,13 @@
 # Automatically processes CIC-IDS2017 CSVs and generates detection rules.
 #
 # Usage:
-#   # First: Load CSVs to parquet (run once)
+#   # Full pipeline: Load CSVs → analyze → verify
+#   make attributes-docker
+#
+#   # Or manually run stages:
 #   docker compose -f docker-compose.analysis.yml run --rm loader
-#
-#   # Then: Run attribute analysis
 #   docker compose -f docker-compose.analysis.yml run --rm analysis
-#
-#   # Or run both:
-#   docker compose -f docker-compose.analysis.yml run --rm loader && \
-#   docker compose -f docker-compose.analysis.yml run --rm analysis
-#
-#   # View generated results
-#   ls -la results/
+#   docker compose -f docker-compose.analysis.yml run --rm verify
 
 version: '3.8'
 
@@ -30,39 +25,9 @@ services:
     volumes:
       - ./data:/app/data
       - ./results:/app/results
+      - ./scripts:/app/scripts:ro
     working_dir: /app
-    command: >
-      python -c "
-      from streamguard.ingestion.cicids2017 import CICIDSLoader
-      import glob
-      
-      print('[1] Scanning for CIC-IDS2017 CSV files...')
-      files = sorted(glob.glob('data/TrafficLabelling/*ISCX.csv'))
-      if not files:
-          print('ERROR: No CIC-IDS2017 CSV files found in data/TrafficLabelling/')
-          print('Please download GeneratedLabelledFlows.zip from https://www.unb.ca/cic/datasets/ids-2017.html')
-          exit(1)
-      
-      print(f'Found {len(files)} files:')
-      for f in files:
-          print(f'  - {f}')
-      
-      print('[2] Loading and cleaning data...')
-      loader = CICIDSLoader()
-      df = loader.load('data/TrafficLabelling/*ISCX.csv')
-      print(f'Loaded {len(df)} rows')
-      
-      print('[3] Converting to Parquet...')
-      import os
-      os.makedirs('data/processed', exist_ok=True)
-      loader.to_parquet('data/processed/cic-ids2017.parquet')
-      
-      print('[4] Summary:')
-      for key, val in loader.describe().items():
-          print(f'  {key}: {val}')
-      
-      print('\\n✓ Parquet file ready at data/processed/cic-ids2017.parquet')
-      "
+    command: python scripts/load_cicids.py
 
   # ---- Stage 2: Run Attribute Analysis ----
   analysis:
@@ -74,34 +39,13 @@ services:
       - ./data:/app/data
       - ./results:/app/results
     working_dir: /app
-    depends_on:
-      - loader
-    command: python scripts/attribute_analysis.py \
-             --input data/processed/cic-ids2017.parquet \
-             --output results/
+    command: sh -c "python scripts/attribute_analysis.py --input data/processed/cic-ids2017.parquet --output results/"
 
   # ---- Stage 3 (Optional): Verify outputs ----
   verify:
-    image: python:3.12-slim
+    image: python:3.12
     container_name: streamguard-verify
     volumes:
       - ./results:/app/results
     working_dir: /app
-    depends_on:
-      - analysis
-    command: >
-      bash -c "
-      echo '=== Attribute Analysis Results ===' &&
-      echo '' &&
-      echo '✓ Generated Files:' &&
-      ls -lh /app/results/ | tail -n +2 &&
-      echo '' &&
-      echo '✓ Attribute Table (first 10 rows):' &&
-      python -c \"
-      import pandas as pd
-      df = pd.read_csv('/app/results/attribute_table.csv')
-      print(df.to_string(max_rows=10))
-      \" &&
-      echo '' &&
-      echo '✓ Done!'
-      "
+    command: sh -c "echo '=== Attribute Analysis Results ===' && ls -lh /app/results/ && echo '' && echo '✓ Done!'"
