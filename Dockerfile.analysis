@@ -1,0 +1,38 @@
+# Dockerfile for CIC-IDS2017 Attribute Analysis
+# Builds a minimal Python environment with all ML dependencies
+#
+# Usage:
+#   docker build -f Dockerfile.analysis -t streamguard-analysis .
+#   docker run --rm -v $(pwd)/data:/app/data -v $(pwd)/results:/app/results \
+#       streamguard-analysis python scripts/attribute_analysis.py
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only what we need
+COPY pyproject.toml .
+COPY scripts/ scripts/
+COPY streamguard/ streamguard/
+
+# Install Python dependencies (including ML extras)
+RUN pip install --no-cache-dir \
+    pandas>=2.0,<3.0 \
+    numpy>=1.24,<3.0 \
+    scikit-learn>=1.4,<2.0 \
+    scipy>=1.12,<2.0 \
+    matplotlib>=3.8,<4.0 \
+    seaborn>=0.13,<1.0
+
+# Create output directories
+RUN mkdir -p /app/data /app/results
+
+# Default command
+CMD ["python", "scripts/attribute_analysis.py", \
+     "--input", "data/processed/cic-ids2017.parquet", \
+     "--output", "results/"]

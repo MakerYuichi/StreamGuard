@@ -8,7 +8,7 @@
 #
 # All Python commands run from the repo root so `streamguard.*` imports resolve.
 
-.PHONY: help infra-up infra-down test lint replay consumer frontend eval
+.PHONY: help infra-up infra-down test lint replay consumer frontend eval attributes attributes-docker
 
 # ── Default target ─────────────────────────────────────────────────────────────
 help:
@@ -24,6 +24,7 @@ help:
 	@echo "  frontend    Start the Vite dev server"
 	@echo "  eval        Run the batch-vs-streaming comparison (requires infra-up + replay + consumer)"
 	@echo "  attributes  Analyze CIC-IDS2017 attributes and generate detection rules"
+	@echo "  attributes-docker  Run analysis in Docker (loads CSV → parquet → analysis)"
 	@echo ""
 
 # ── Infrastructure ─────────────────────────────────────────────────────────────
@@ -71,3 +72,15 @@ attributes:
 	python scripts/attribute_analysis.py \
 		--input data/processed/cic-ids2017.parquet \
 		--output results/
+
+# ── Attribute Analysis (Docker) ────────────────────────────────────────────────
+attributes-docker:
+	@echo "[docker] Building analysis container..."
+	docker compose -f docker-compose.analysis.yml build --no-cache
+	@echo "[docker] Loading CIC-IDS2017 CSVs to parquet..."
+	docker compose -f docker-compose.analysis.yml run --rm loader
+	@echo "[docker] Running attribute analysis..."
+	docker compose -f docker-compose.analysis.yml run --rm analysis
+	@echo "[docker] Verifying outputs..."
+	docker compose -f docker-compose.analysis.yml run --rm verify
+	@echo "[docker] Done! Results in results/"
